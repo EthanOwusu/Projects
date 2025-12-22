@@ -1,0 +1,336 @@
+---
+title: "STA 4320 Project"
+author: "Ethan Owusu-Bour and Anna Yee"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r Data}
+salaries = read.csv("salaries.csv")
+games = read.csv("games.csv")
+boxscore = read.csv("boxscore.csv")
+info = read.csv("player_info.csv")
+```
+
+
+```{r Reformatting}
+library(dplyr)
+library(stringr)
+
+clean_name <- function(x) {
+  x %>%
+    str_trim() %>%
+    str_to_lower() %>%
+    str_replace_all("[\\*\\.,']", "") %>%  # remove asterisks, commas, periods, apostrophes
+    str_replace_all("\\s+", " ")           # normalize spaces
+}
+
+
+salaries <- salaries %>%
+  mutate(
+    playerName = clean_name(playerName),
+    inflationAdjSalary = as.numeric(gsub("[$,]", "", inflationAdjSalary)),
+    salary = as.numeric(gsub("[$,]", "", salary))
+  )
+
+boxscore <- boxscore %>%
+  mutate(playerName = clean_name(playerName))
+
+info <- info %>%
+  mutate(playerName = clean_name(playerName))
+```
+
+
+
+```{r Full Dataframe}
+df <- boxscore %>%
+  left_join(games, by = "game_id") %>%
+  left_join(salaries, by = c("playerName", "seasonStartYear")) %>%
+  left_join(info, by = "playerName")
+
+df <- df %>%
+  mutate(across(c(FG, FGA, X3P, X3PA, FT, FTA, ORB, DRB, TRB, AST, STL, BLK, TOV, PF, PTS),
+                ~ suppressWarnings(as.numeric(.))))
+
+```
+
+
+```{r Sorting}
+stats <- df %>%
+  group_by(playerName, seasonStartYear) %>%
+  summarize(
+    across(
+      c(FG, FGA, X3P, X3PA, FT, FTA, ORB, DRB, TRB, AST, STL, BLK, TOV, PF, PTS),
+      ~ mean(., na.rm = TRUE),
+      .names = "mean_{col}"
+    ),
+    games_played = n(),
+    inflationAdjSalary = first(inflationAdjSalary),
+    Pos = first(Pos),
+    Ht = first(Ht),
+    Wt = first(Wt),
+    .groups = "drop"
+  )
+
+stats <- stats %>%
+  select(playerName, seasonStartYear, inflationAdjSalary, everything())
+
+names(stats)[names(stats) == "inflationAdjSalary"] <- "salary"
+
+
+```
+
+
+```{r Cleaning}
+any(is.na(stats))
+stats <- na.omit(stats)
+```
+
+```{r Position Boxplots}
+library(ggplot2)
+ggplot(stats, aes(x = Pos, y = salary, fill = Pos)) +
+  geom_boxplot(alpha = 0.7, outlier.color = "red") +
+  theme_minimal() +
+  labs(
+    title = "Salary Distribution by Position",
+    x = "Position",
+    y = "salary (inflation-adjusted)"
+  ) +
+  theme(legend.position = "none")
+
+```
+
+
+```{r Pruning}
+stats$Ht_in <- sapply(strsplit(stats$Ht, "-"), function(x) as.numeric(x[1]) * 12 + as.numeric(x[2]))
+stats1 <- subset(stats, select = -c(playerName, Ht, Pos))
+head(stats1)
+```
+
+
+
+```{r Heatmap}
+c = round(cor(stats1),4)
+library(reshape2)
+
+
+c_long <- melt(c)
+
+ggplot(c_long, aes(Var1, Var2, fill = value)) +
+  geom_tile(color = "black") +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white",
+                       midpoint = 0, limit = c(-1,1)) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "", y = "", fill = "Correlation")
+
+```
+
+
+```{r More Pruning}
+stats1 <- subset(stats1, select = -c(mean_FGA, mean_X3PA, mean_FTA, mean_ORB, mean_DRB, mean_PTS))
+```
+
+```{r Pruned Heatmap}
+c = round(cor(stats1),4)
+
+library(ggplot2)
+library(reshape2)
+
+
+c_long <- melt(c)
+
+ggplot(c_long, aes(Var1, Var2, fill = value)) +
+  geom_tile(color = "black") +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white",
+                       midpoint = 0, limit = c(-1,1)) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "", y = "", fill = "Correlation")
+```
+
+```{r Training Testing}
+n = nrow(stats1)
+set.seed(1) 
+train = sample(n, 0.8*n, replace = FALSE) 
+training = stats1[train,]
+testing = stats1[-train,]
+```
+
+
+```{r Best Subset Selector}
+library(leaps)
+sub_sel = regsubsets(salary ~ ., nvmax = 13, data = training)
+sub_res = summary(sub_sel)
+cat("The best model using BIC contains", which.min(sub_res$bic), "predictors")
+```
+
+
+```{r BIC Visualization}
+plot(sub_sel, scale = "bic")
+plot(sub_res$bic, xlab = "Number of Variables", ylab = "BIC", type = "l")
+points(10, sub_res$bic[10], col = "red", cex = 2, pch = 20)
+sub_res$which[10,]
+```
+
+
+```{r Regression Model}
+reg <- lm(salary ~ seasonStartYear + mean_FG + mean_X3P + mean_FT +
+                mean_TRB + mean_AST + mean_STL + mean_BLK + mean_PF + Ht_in,
+              data = training)
+
+summary(reg)
+```
+
+```{r Error}
+mse = mean((testing$salary - predict(reg, newdata = testing))^2)
+rmse = sqrt(mse)
+cat("On average, predicted salaries are off by about:", round(rmse))
+```
+
+```{r Residual Plot}
+plot(reg, which = c(1,2), pch = 16)
+```
+
+
+```{r Log Response Residuals}
+reg_log <- lm(log(salary) ~ seasonStartYear + mean_FG + mean_X3P + mean_FT +
+                mean_TRB + mean_AST + mean_STL + mean_BLK + mean_PF + Ht_in,
+              data = training)
+
+plot(reg_log, which = c(1,2), pch = 16)
+```
+
+
+```{r KNN Training}
+library(kknn)
+
+set.seed(1)
+k_grid <- seq(3, 25, 2)
+
+cv_results <- data.frame(k = k_grid, mse = NA)
+
+for (i in seq_along(k_grid)) {
+  model <- train.kknn(
+    formula = salary ~ seasonStartYear + mean_FG + mean_X3P + mean_FT +
+                        mean_TRB + mean_AST + mean_STL + mean_BLK + mean_PF + Ht_in,
+    data = training,
+    kmax = k_grid[i],
+    kernel = "rectangular",
+    scale = TRUE
+  )
+  preds <- predict(model, testing)
+  cv_results$mse[i] <- mean((testing$salary - preds)^2)
+}
+
+
+plot(cv_results$k, cv_results$mse, type = "b",
+     xlab = "k", ylab = "Test MSE", main = "KNN performance")
+
+```
+
+
+```{r Comparison}
+cat("From KNN, the best k value is",
+      cv_results[which.min(cv_results$mse), 1],
+      "with an MSE of:",
+      cv_results[which.min(cv_results$mse), 2],"\n")
+
+cat("This means our predictions will be off by about",
+      round(sqrt(cv_results[which.min(cv_results$mse), 2])),
+      "which isn't much better than the error from our linear model.")
+```
+
+```{r Prediction Data}
+predicting = read.csv("pred.csv")
+```
+
+
+```{r Predicted Models}
+pred_lin <- predict(reg, newdata = predicting)
+pred_lin
+
+best_k <- 7  # from earlier results
+
+knn_best <- train.kknn(
+  formula = salary ~ seasonStartYear + mean_FG + mean_X3P + mean_FT +
+                      mean_TRB + mean_AST + mean_STL + mean_BLK + mean_PF + Ht_in,
+  data = training,
+  kmax = best_k,
+  kernel = "rectangular",
+  scale = TRUE
+)
+
+pred_knn <- predict(knn_best, newdata = predicting)
+pred_knn
+
+```
+
+
+```{r Predicted DF}
+predicted <- predicting
+
+predicted$Linear_Model <- round(pred_lin)
+predicted$KNN_Model <- round(pred_knn)
+```
+
+
+```{r True Values}
+true_salaries=c(8.3, 17.28, 4.21512, 1.563518, 16.5, 0.508891, 4.220057+0.508891, 0.223339,
+               17.4, 10.843350, 2.385480, 2.696400, 1.815677, 0.239822, 2.840160, 2.3)
+true_salaries<-true_salaries*1000000
+```
+
+
+```{r}
+knn_pred=predicted$KNN_Model
+lin_pred=predicted$Linear_Model
+
+mse_knn=mean( (knn_pred-true_salaries)^2 )
+mse_lin=mean( (lin_pred-true_salaries)^2 )
+
+mse_knn
+mse_lin
+
+```
+
+
+```{r}
+predicted$True_Salary <- round(true_salaries)
+# keep only relevant columns
+table_data <- predicted[, c("Player", "True_Salary", "Linear_Model", "KNN_Model")]
+
+library(gt)
+
+# Replace that corrupted player name
+table_data$Player[4] <- "vitkrejci"
+
+# Clean text encoding before exporting
+table_data[] <- lapply(table_data, function(x) {
+  if (is.character(x)) iconv(x, from = "", to = "UTF-8", sub = "byte") else x
+})
+
+# Create table
+table_gt <- table_data %>%
+  gt() %>%
+  tab_header(
+    title = "Model Predictions vs True Salaries",
+    subtitle = "Linear Model vs KNN Model"
+  ) %>%
+  fmt_currency(
+    columns = c(True_Salary, Linear_Model, KNN_Model),
+    currency = "USD",
+    decimals = 0
+  )
+
+table_gt
+
+# Save as image
+# gtsave(table_gt, "table_data.png")
+```
