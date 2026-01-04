@@ -3,7 +3,7 @@ This repository contains applied statistics and machine learning projects in R a
 
 ## Focus
 - Statistical analysis and inference in R and Python
-- Applying machine learning various data
+- Applying machine learning to various datasets
 - Emphasis on methodology and interpretation
 
 ### Projects
