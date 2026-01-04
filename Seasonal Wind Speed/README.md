@@ -1,5 +1,5 @@
 ## Overview
-This project uses a built-in dataset and feature engineering to apply nonparametric techniques. Interpretation is provided in the written report.
+This project uses a built-in R dataset and feature engineering to apply nonparametric statistical techniques. Interpretation is provided in the written report.
 
 ## Contents
 - [Nonparametric Data Analysis](./Nonparametric%20Project.R)
