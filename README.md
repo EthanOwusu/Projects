@@ -1,4 +1,4 @@
-# Overview
+## Overview
 This repository contains applied statistics and machine learning projects in R and Python
 
 ## Focus
@@ -6,7 +6,7 @@ This repository contains applied statistics and machine learning projects in R a
 - Applying machine learning to various datasets
 - Emphasis on methodology and interpretation
 
-### Projects
+## Projects
 - **NBA Salary Analysis** – R-based exploratory analysis and modeling ([README](./NBA%20Salary%20Analysis/README.md))
 - **League Sim** – Python simulation with AI-controlled opponent ([README](./League%20Sim/README.md))
 - **LoL Feature Analysis** – Feature engineering and inferential analysis ([README](./LoL%20Feature%20Analysis/README.md))
